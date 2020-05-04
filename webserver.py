@@ -6,7 +6,10 @@
 # LIBRARIES
 from flask import Flask, render_template, request, redirect, url_for, flash, session, g
 from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.utils import secure_filename
+# from flask_sqlalchemy import SQLAlchemy
 from flask_wtf import FlaskForm
+# from flask_login import LoginManager, UserMixin
 from wtforms import SelectField
 from datetime import datetime
 import functools
@@ -24,8 +27,13 @@ import profile_history as prof_hist
 import poster_image as pi
 
 ############# START UP CONFIGURATION #############
+# app configuration
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'dev'
+# app.config['UPLOAD_FOLDER'] = 
+
+# sql_db = SQLAlchemy(app)
+# login = LoginManager(app)
 
 ############# CLASSES AND METHODS #############
 '''
@@ -38,6 +46,50 @@ Created by Jessica 04.27
 class ReccDropForm(FlaskForm):
     rent = SelectField('rent_title', choices=[([],"Select a movie or tv show")], default="Select a movie or tv show")
     buy = SelectField('buy_title', choices=[([],"Select a movie or tv show")], default="Select a movie or tv show")
+
+# # NOT USED
+# '''
+# Class for each user to manage who's on and where
+
+# Inherits from SQLAlchemy Model and Flask-Login UserMixin
+
+# Created by Jessica 04.27
+# NOTE: CHECK WHERE NEED TO REPLACE IN EXISTING CODE TO ACCEPT NOW USING USER CLASS
+# '''
+# class User(UserMixin, sql_db.Model):
+#     # NOTE: THE BITS HERE ARE COPIED FROM ONLINE FLASK TUTORIAL (MIGUEL GRINBERG MEGATUTORIAL) BUT MIGHT BE SKIPPED OVER FOR ESTABLISHED MYSQL INSTEAD
+#     user_id = sql_db.Column(sql_db.Integer, primary_key=True)
+#     username = sql_db.Column(sql_db.String(64), index=True, unique=True)
+#     email = sql_db.Column(sql_db.String(120), index=True, unique=True)
+#     password_hash = sql_db.Column(sql_db.String(128))
+
+#     '''
+#     Tells Python how to print objects of this class
+
+#     Inputs: Object self
+#     Returns: String representing user
+#     '''
+#     def __repr__(self):
+#         return '<User {}>'.format(self.username)
+
+#     '''
+#     Sets and hashes password
+
+#     Inputs: User self: user object
+#             String password: user created password
+#     '''
+#     def set_password(self, password):
+#         self.password_hash = generate_password_hash(password)
+
+#     '''
+#     Checks against password already attributed to user
+
+#     Inputs: User self: user object
+#             String password: password entered by password
+#     Returns: Boolean True or False depending on if password matches password assigned to user object
+#     '''
+#     def check_password(self, password):
+#         return check_password_hash(self.password_hash, password)
 
 '''
 Check if user id is stored in session
@@ -69,6 +121,15 @@ def login_required(view):
             return redirect(url_for('login'))
         return view(**kwargs)
     return wrapped_view
+
+# # NOT USED
+# '''
+# Loading user as moves between pages
+# '''
+# @login.user_loader
+# def load_user(user_id):
+#     return User.query.get(int(id))
+
 
 ############# PAGES #############
 
@@ -160,7 +221,7 @@ def login():
         if error is None:
             session.clear()
             session['user_id'] = user['userID']
-            return redirect(url_for('profile_edit'))
+            return redirect(url_for('profile_edit', username=username))
 
         flash(error)
 
@@ -186,55 +247,72 @@ def browse():
 
 ################# EDIT #################
 # user profile main page; auto routes to edit profile page
-@app.route('/profile')
-@app.route('/profile/edit')
+@app.route('/<username>/profile')
+@app.route('/<username>/profile/edit')
 @login_required
-def profile_edit():
-    # need to make this variable through login verification
-    username = "PROTOTYPE_TEST"
-
+def profile_edit(username):
     # get user bio
     bio = prof_edit.get_bio(username)
 
     # get user top three genre
     top_three = prof_edit.three_genre(prof_edit.ranked_genre(username))
-    # print(top_three)
+    
+    # get information for author card
+    card = prof_edit.get_card(username)
 
     # need to be able to edit author cards later
     profile = {'username':username,
+                'fname': card['fname'],
+                'lname': card['lname'],
+                'join_month': card['join_month'],
+                'join_year': card['join_year'],
                 'bio': bio,
                 'top_three':top_three}
 
     # page = prof_edit.main('profile/profile-edit.html', username)
     # return page
-    return render_template('profile/profile-edit.html', profile=profile)
+    return render_template('profile/profile-edit.html', profile=profile, username=username)
 
-@app.route('/profile/edit-bio', methods=('GET', 'POST'))
+@app.route('/<username>/profile/edit-bio', methods=('GET', 'POST'))
 @login_required
-def profile_edit_bio():
-    # come back and find way to pass this variable later, maybe /profile/edit-bio/<username>
-    username = "PROTOTYPE_TEST"
+def profile_edit_bio(username):
+    # get info for author card
+    card = prof_edit.get_card(username)
 
+    # get user existing bio
     bio = prof_edit.get_bio(username)
+
+    # pack info for author card and page
+    profile = {'username':username,
+                'fname': card['fname'],
+                'lname': card['lname'],
+                'join_month': card['join_month'],
+                'join_year': card['join_year'],
+                'bio': bio}
 
     if request.method == 'POST':
         bio_body = request.form['bio_body']
         prof_edit.update_sql_bio(username, bio_body)
-        return redirect(url_for('profile_edit'))
+        return redirect(url_for('profile_edit', username=username))
 
-    profile = {'username':username,
-                'bio': bio}
-    return render_template('profile/profile-edit-bio.html', profile=profile)
+    return render_template('profile/profile-edit-bio.html', profile=profile, username=username)
 
 ################# HISTORY #################
 # user profile history and watchlist page
-@app.route('/profile/history')
+@app.route('/<username>/profile/history')
 @login_required
-def profile_history():
+def profile_history(username):
+    # get info for author card
+    card = prof_edit.get_card(username)
+
     # list of watchlist tables and files
     watchlists = []
-    # TESTING HARDCODE, GET RID OF LATER; dictionary in list
-    watchlists.append({'title':'My Watchlist', 'file':'IMDb_Watchlist_Jenny'})
+
+    # connect to database to get existing watchlist names
+    conn = db.get_db()
+    user_lists = conn.execute('''SELECT DISTINCT watchlist_name FROM IMDb_Watchlist WHERE username="{username}"'''.format(username=username)).fetchall()
+    for ent in user_lists:
+        watchlists.append(ent['watchlist_name'])
 
     # list of recent videos; restrict to 4 titles
     recents = []
@@ -249,18 +327,19 @@ def profile_history():
     # dictionary containing page content
     page = {'watchlists': watchlists,
             'recents': recents }
-    return render_template('profile/profile-history.html', page=page)
+    return render_template('profile/profile-history.html', profile=card, page=page, username=username)
 
 # page from user profile specifically to a watchlist
-@app.route('/profile/watchlist/<watch_name>', methods=('GET', 'POST'))
+@app.route('/<username>/profile/watchlist/<watch_name>', methods=('GET', 'POST'))
 @login_required
-def profile_watchlist_each(watch_name):
+def profile_watchlist_each(username, watch_name):
+    # get info for author card
+    card = prof_edit.get_card(username)
+    
     # watchlist name
-    # watchlist = {}
-    # TESTING HARDCODE, TAKE CARE IN SQL AND GET RID LATER
-    watchlist = prof_hist.parse_watchlist_for_page("IMDb_Watchlist_Jenny", "Parsed_Watchlist_Jenny")
+    watchlist = prof_hist.parse_watchlist_for_page(username,watch_name)
 
-    return render_template('/profile/profile-watchlist-each.html', watch_name=watch_name, watchlist=watchlist)
+    return render_template('/profile/profile-watchlist-each.html', profile=card, watch_name=watch_name, watchlist=watchlist, username=username)
 
 # # trying to get pagination on watchlist pages
 # # COME BACK TO THIS LATER
@@ -275,22 +354,24 @@ def profile_watchlist_each(watch_name):
 #     return render_template('/profile/profile-pagination.html', posts=posts)
 
 # user adding watchlist
-@app.route('/profile/watchlist/add', methods=('GET','POST'))
+@app.route('/<username>/profile/watchlist/add', methods=('GET','POST'))
 @login_required
-def profile_watchlist_add():
-    return render_template('/profile/profile-watchlist-add.html')
+def profile_watchlist_add(username):
+    # get info for author card
+    card = prof_edit.get_card(username)
+    
+    return render_template('/profile/profile-watchlist-add.html', profile=card, username=username)
 
 ################# RECOMMENDATION #################
 # streaming service recommendation
-@app.route('/profile/recommendation', methods=['GET','POST'])
+@app.route('/<username>/profile/recommendation', methods=['GET','POST'])
 @login_required
-def profile_recommendation():
-#     page = "Profile recommendation page"
-    # page = pr.main('profile/profile-recommendation.html','Parsed_Watchlist_Jenny')
-    # return page
+def profile_recommendation(username):
+    # get info for author card
+    card = prof_edit.get_card(username)
 
     # gets main content loaded onto screen
-    page_content = pr.main('Parsed_Watchlist_Jenny')
+    page_content = pr.main(username)
     drops = ReccDropForm()
     drops.rent.choices.extend([([ind_cont['platform'],ind_cont['price']],ind_cont['title']) for ind_cont in page_content['indiv_rents']])
     drops.buy.choices.extend([([ind_cont['platform'],ind_cont['price']],ind_cont['title']) for ind_cont in page_content['indiv_buys']])
@@ -299,56 +380,96 @@ def profile_recommendation():
     # if request.method == 'POST':
     #     return
 
-    return render_template('profile/profile-recommendation.html', service_recc=page_content['service_recc'], indiv_rents=page_content['indiv_rents'], indiv_buys=page_content['indiv_buys'], plat_content=page_content['plat_content'], drop_form=drops)
+    return render_template('profile/profile-recommendation.html', profile=card, service_recc=page_content['service_recc'], indiv_rents=page_content['indiv_rents'], indiv_buys=page_content['indiv_buys'], plat_content=page_content['plat_content'], drop_form=drops, username=username)
 
 ################# SECURITY #################
 # user profile security and login page
-@app.route('/profile/security')
+@app.route('/<username>/profile/security', methods=('GET', 'POST'))
 @login_required
-def profile_security():
-#    page = "Profile security page"
-    return render_template('profile/profile-security.html')
+def profile_security(username):
+    # get info for author card
+    card = prof_edit.get_card(username)
+
+    # connect to db
+    conn = db.get_db()
+    
+    # dictionary for items to put into input boxes of page
+    form_input = conn.execute('''SELECT username, password, email FROM all_user_data WHERE username="{username}"'''.format(username=username)).fetchone()
+    form_dic = {'username':form_input['username'],'password':form_input['password'],'email':form_input['email']}
+
+    # update database from submitting change to form
+    if request.method == 'POST':
+        # OH WHOOPS NEED TO ADDRESS DUPLICATES
+        # update_username = conn.execute('''UPDATE all_user_data SET username="{username}" WHERE ''')
+        update_password = conn.execute('''UPDATE all_user_data SET password="{password}" WHERE username="{username}"'''.format(password=request.form['password'], username=username))
+        update_email = conn.execute('''UPDATE all_user_data SET email="{email}" WHERE username="{username}"'''.format(email=request.form['email'],username=username))
+
+        return redirect(url_for('profile_security', username=username))
+
+    conn.close()
+
+    return render_template('profile/profile-security.html', profile=card, username=username, form_dic=form_dic)
 
 ################# LINKED #################
 # user profile linked accounts page
-@app.route('/profile/linked')
+@app.route('/<username>/profile/linked')
 @login_required
-def profile_linked():
+def profile_linked(username):
+    # get info for author card
+    card = prof_edit.get_card(username)
+    
     # get boolean statuses from sql
-    # eventually route directly to account page
-
-    # TESTING HARDCODE WHILE MYSQL IS DOING SOMETHING WEIRD
-    linked = {'amazon_prime':True, 'netflix': True, 'hbo': True, 'hulu': True}
+    linked = db.linked_account_status(username)
 
 #    page = "Profile linked page"
-    return render_template('profile/profile-linked.html', linked=linked)
+    return render_template('profile/profile-linked.html', profile=card, linked=linked, username=username)
 
 # updating which linked accounts user has
-@app.route('/profile/linked/update')
+@app.route('/<username>/profile/linked/update', methods=('GET', 'POST'))
 @login_required
-def profile_linked_update():
-    # get form response to store updated info into database
+def profile_linked_update(username):
+    # get info for author card
+    card = prof_edit.get_card(username)
     
-    # TESTING HARDCODE WHILE MYSQL IS DOING SOMETHING WEIRD
-    linked = {'amazon_prime':True, 'netflix': True, 'hbo': True, 'hulu': True}
+    # get boolean statuses from sql
+    linked = db.linked_account_status(username)
 
-    return render_template('profile/profile-linked-update.html', linked=linked)
+    # get form response to store updated info into database
+    if request.method == 'POST':
+        # posting information to database
+        if request.form.get('amazon_prime') is not None:
+            db.update_account_status(username,'linked_amazon',True)
+        if request.form.get('netflix') is not None:
+            db.update_account_status(username,'linked_netflix',True)
+        if request.form.get('hbo') is not None:
+            db.update_account_status(username,'linked_hbo',True)
+        if request.form.get('hulu') is not None:
+            db.update_account_status(username,'linked_hulu',True)
+
+        return redirect(url_for('profile_linked', username=username))
+
+    return render_template('profile/profile-linked-update.html', profile=card, linked=linked, username=username)
 
 ################# PREFERENCES #################
 # user profile content preferences page
-@app.route('/profile/preferences')
+@app.route('/<username>/profile/preferences')
 @login_required
-def profile_preferences():
-#    page = "Profile preferences page"
-    return render_template('profile/profile-preference.html')
+def profile_preferences(username):
+    # get info for author card
+    card = prof_edit.get_card(username)
+    
+    # page = "Profile preferences page"
+    return render_template('profile/profile-preference.html', profile=card, username=username)
 
-# import watchlist - user profile version
-# INCOMPLETE TEMPLATE
-@app.route('/profile/import')
-@login_required
-def profile_import():
-#    page = "Profile import page"
-    return render_template('profile/profile-generic.html')
+################# INCOMPLETE #################
+# # import watchlist - user profile version
+# # INCOMPLETE TEMPLATE
+# # SEE WATCHLIST ADD INSTEAD
+# @app.route('/profile/import')
+# @login_required
+# def profile_import():
+# #    page = "Profile import page"
+#     return render_template('profile/profile-generic.html')
 
 # watchlist pages
 # INCOMPLETE TEMPLATE
